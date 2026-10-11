@@ -1,4 +1,5 @@
 import { isKokoroVoice, KOKORO_VOICES, toKokoroVoiceName } from './lib/kokoro.js';
+import { OCR_MODELS } from './lib/ollama-ocr.js';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './lib/settings.js';
 
 const SAMPLE_TEXT = 'This is how the speech bubbles will sound.';
@@ -7,6 +8,7 @@ const ui = {
   toggle: document.getElementById('toggle'),
   status: document.getElementById('status'),
   ocrStatus: document.getElementById('ocr-status'),
+  ocrModel: document.getElementById('ocr-model'),
   ttsStatus: document.getElementById('tts-status'),
   voice: document.getElementById('voice'),
   kokoroVoices: document.getElementById('kokoro-voices'),
@@ -27,6 +29,7 @@ const [settings, voices, state] = await Promise.all([
 ]);
 
 renderVoices(voices, settings.voiceName);
+renderOcrModels(settings.ocrModel);
 ui.rate.value = settings.rate;
 ui.pitch.value = settings.pitch;
 ui.reread.checked = settings.rereadOnReturn;
@@ -38,6 +41,11 @@ renderVoiceKind();
 ui.toggle.disabled = false;
 
 ui.toggle.addEventListener('click', toggleReading);
+ui.ocrModel.addEventListener('change', async () => {
+  await saveSettings({ ocrModel: ui.ocrModel.value });
+  const { ocr } = await chrome.runtime.sendMessage({ type: 'popup:get-state', tabId: tab.id });
+  renderStatus(ui.ocrStatus, ocr);
+});
 ui.voice.addEventListener('change', () => {
   renderVoiceKind();
   saveSettings({ voiceName: ui.voice.value });
@@ -102,6 +110,12 @@ function renderVoiceKind() {
 function renderSliderValues() {
   ui.rateValue.textContent = `${Number(ui.rate.value).toFixed(1)}×`;
   ui.pitchValue.textContent = `${Number(ui.pitch.value).toFixed(1)}×`;
+}
+
+function renderOcrModels(selectedModel) {
+  for (const { id, label } of OCR_MODELS) ui.ocrModel.add(new Option(label, id));
+  ui.ocrModel.value = selectedModel;
+  if (ui.ocrModel.value !== selectedModel) ui.ocrModel.value = DEFAULT_SETTINGS.ocrModel;
 }
 
 function renderVoices(voiceList, selectedName) {

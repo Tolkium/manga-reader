@@ -12,11 +12,18 @@
   const LOG_PREFIX = '[Manga Reader]';
   /** Queued bubbles whose audio is generated ahead (used by Kokoro voices). */
   const PREPARE_AHEAD = 2;
+  /** CSS pixels: images this close above or below each other form one strip. */
+  const MAX_STRIP_GAP = 12;
 
   /**
    * @typedef {{ x0: number, y0: number, x1: number, y1: number }} BBox
    * @typedef {{ img: HTMLImageElement, bbox: BBox, text: string, read: boolean, prepared?: boolean }} Bubble
-   * @typedef {{ url: string, status: 'pending' | 'running' | 'done' | 'failed' }} ImageEntry
+   * @typedef {{
+   *   url: string,
+   *   status: 'pending' | 'running' | 'done' | 'failed',
+   *   above?: HTMLImageElement,
+   *   below?: HTMLImageElement,
+   * }} ImageEntry `above` and `below` are the neighbours it was read with.
    */
 
   /** @type {Map<HTMLImageElement, ImageEntry>} */
@@ -96,8 +103,42 @@
         images.set(img, { url: img.currentSrc, status: 'pending' });
       }
     }
+    rereadForNewNeighbours();
     processNextImage();
     checkVisibility();
+  }
+
+  /**
+   * Lazy-loaded pages often appear after the image above them was read. Read
+   * that image again with the new neighbour, so a bubble cut by the border is
+   * read whole.
+   */
+  function rereadForNewNeighbours() {
+    for (const [img, entry] of images) {
+      if (entry.status !== 'done') continue;
+      const { above, below } = findNeighbours(img);
+      if ((above && !entry.above) || (below && !entry.below)) entry.status = 'pending';
+    }
+  }
+
+  /** Comic images directly above and below `img`, as on a webtoon strip. */
+  function findNeighbours(img) {
+    const rect = img.getBoundingClientRect();
+    let above;
+    let below;
+    for (const other of images.keys()) {
+      if (other === img) continue;
+      const otherRect = other.getBoundingClientRect();
+      if (!alignedInColumn(rect, otherRect)) continue;
+      if (Math.abs(otherRect.bottom - rect.top) <= MAX_STRIP_GAP) above = other;
+      if (Math.abs(otherRect.top - rect.bottom) <= MAX_STRIP_GAP) below = other;
+    }
+    return { above, below };
+  }
+
+  function alignedInColumn(a, b) {
+    const overlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    return overlap >= 0.9 * Math.min(a.width, b.width);
   }
 
   function isComicImage(img) {
@@ -120,10 +161,15 @@
     if (!img) return;
 
     const entry = images.get(img);
-    entry.status = 'running';
+    Object.assign(entry, findNeighbours(img), { status: 'running' });
     ocrBusy = true;
     try {
-      const response = await chrome.runtime.sendMessage({ type: 'reader:ocr', url: entry.url });
+      const response = await chrome.runtime.sendMessage({
+        type: 'reader:ocr',
+        url: entry.url,
+        aboveUrl: entry.above?.currentSrc,
+        belowUrl: entry.below?.currentSrc,
+      });
       if (response?.error) throw new Error(response.error);
       // Ignore results for images that were removed or changed meanwhile.
       if (images.get(img) === entry) addBubbles(img, response.bubbles);
@@ -154,11 +200,36 @@
     return closest;
   }
 
+  /**
+   * Replaces the image's bubbles. A bubble on an image border can be found by
+   * both images; the copy with more text wins, since the other may be cut.
+   */
   function addBubbles(img, imageBubbles) {
+    const previous = bubbles.filter((bubble) => bubble.img === img);
+    bubbles = bubbles.filter((bubble) => bubble.img !== img);
+
     for (const { bbox, text } of imageBubbles) {
-      bubbles.push({ img, bbox, text, read: false });
+      const bubble = { img, bbox, text, read: false };
+      const rect = getViewportRect(bubble);
+      // Don't read a bubble again just because its image was read again.
+      bubble.read = previous.some((old) => old.read && overlapsMostly(getViewportRect(old), rect));
+
+      const twin = bubbles.find((other) => overlapsMostly(getViewportRect(other), rect));
+      if (twin && twin.text.length >= text.length) continue;
+      if (twin) {
+        bubbles.splice(bubbles.indexOf(twin), 1);
+        bubble.read ||= twin.read;
+      }
+      bubbles.push(bubble);
     }
     bubbles.sort(compareReadingOrder);
+  }
+
+  function overlapsMostly(a, b) {
+    const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    const smallerHeight = Math.min(a.bottom - a.top, b.bottom - b.top);
+    return overlapX > 0 && overlapY > smallerHeight / 2;
   }
 
   function compareReadingOrder(a, b) {

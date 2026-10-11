@@ -10,16 +10,20 @@ voice that also runs on your PC. Nothing leaves your computer.
 
 ## Requirements
 
-- Ollama, plus a GPU with about 8 GB of free VRAM. Qwen3-VL 8B uses about 6 GB.
+- Ollama, plus a GPU with about 5 GB of free VRAM for the default OCR model
+  (Qwen3-VL 4B). The 2B model needs about 3 GB, the 8B model about 7 GB.
 - For Kokoro voices: Python 3.10+ and under 1 GB more VRAM. Without a GPU it
   runs on the CPU, more slowly.
 
 ## Setup
 
-1. Install Ollama and download the model:
+1. Install Ollama and download the OCR model. Download the 2B or 8B model as
+   well if you want to switch between them in the popup:
 
    ```powershell
-   ollama pull qwen3-vl:8b-instruct
+   ollama pull qwen3-vl:4b-instruct
+   ollama pull qwen3-vl:2b-instruct   # optional
+   ollama pull qwen3-vl:8b-instruct   # optional
    ```
 
 2. Allow browser extensions to call Ollama. This is a one-time, user-level setting:
@@ -69,6 +73,7 @@ when the tab leaves that site.
 
 | Setting | Effect |
 | --- | --- |
+| Text finder (OCR model) | Qwen3-VL **2B** (fastest), **4B** (default) or **8B** (most accurate). Smaller models are faster and use less VRAM, but misread stylized lettering more often. Images already read keep their text; new images use the new model. |
 | Voice | **Kokoro (local AI)**: 10 female voices (US and UK) and 5 male voices. **Browser voices**: any voice installed in the browser/OS. In Chrome this includes the free "Google US English" and "Google UK English" voices. |
 | Speech rate | 0.3× – 6×. How fast it really gets depends on the voice; some cap at about 3×. Kokoro voices play at 0.5× – 4× and keep their natural pitch when sped up. |
 | Pitch | 0× – 2× (2× is the browser's maximum). How strongly pitch changes the sound depends on the voice. Not available for Kokoro voices. |
@@ -78,8 +83,9 @@ when the tab leaves that site.
 
 ```
 content.js (page)            background.js (service worker)        Ollama (localhost:11434)
-  find comic images  ──ocr──▶  fetch image, cut into tiles  ──tile──▶  qwen3-vl:8b-instruct
-  map bubbles to screen ◀──────  merge tiles, cache per URL  ◀─JSON──  text + box per bubble
+  find comic images  ──ocr──▶  fetch image + neighbours'     ──tile──▶  qwen3-vl (2b/4b/8b)
+                               edges, cut into tiles
+  map bubbles to screen ◀──────  merge tiles, cache results  ◀─JSON──  text + box per bubble
   queue fully visible ──speak─▶ chrome.tts (rate, pitch, voice)
                                or offscreen.js ──text──▶ tts-server (localhost:5005)
                                   plays WAV  ◀──audio──  Kokoro-82M (PyTorch)
@@ -94,14 +100,23 @@ content.js (page)            background.js (service worker)        Ollama (local
   the image width tall). Each tile is sent to the model, which is constrained to
   return JSON. Bubbles cut by a tile edge are dropped, because they appear whole
   in the neighbouring tile, and duplicates from the overlap are merged.
-- On an RTX 5080 a tile takes about 1 second. A typical chapter (18 tall images)
-  takes about 3 minutes, which keeps well ahead of normal reading.
+- **Bubbles split between two images**: sites often cut one long strip into
+  several images, sometimes right through a bubble. Images that sit directly
+  above each other (at most 12 px apart, same column) count as neighbours. Each
+  image is read together with the bottom of the image above and the top of the
+  image below (0.6× the width each), so a split bubble is seen whole. The bubble
+  belongs to the image that holds its centre. If a neighbour loads later, the
+  image is read again, and when both images report the same bubble, the copy
+  with more text is kept.
+- If a small model returns ALL CAPS text anyway, it is converted to sentence case.
+- On an RTX 5080 the 4B model reads a page about 25% faster than 8B, and 2B
+  about 50% faster. Reading the neighbours' edges adds about 30% more work.
 - **Kokoro voices**: `tts-server/kokoro_server.py` turns a bubble's text into a
   WAV file. The background plays it in an offscreen document, because a service
   worker can't play audio. While one bubble plays, the next two queued bubbles
   are generated ahead. On an RTX 5080 a bubble takes about 0.1 seconds.
 
-To try another Ollama vision model, change `MODEL` in `lib/ollama-ocr.js`.
+To try another Ollama vision model, add it to `OCR_MODELS` in `lib/ollama-ocr.js`.
 
 ## Limitations
 

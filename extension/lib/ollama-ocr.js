@@ -5,16 +5,27 @@
  * lettering is unreadable. So the image is cut into overlapping tiles about
  * 1.5 widths tall. Bubbles cut by a tile edge are ignored, because the overlap
  * guarantees they appear whole in the neighbouring tile.
+ *
+ * Sites also split a strip into several images, which can cut a bubble in two.
+ * So the strip read for an image includes the edges of the images directly
+ * above and below it. A bubble belongs to the image that holds its centre, and
+ * its box may reach into the neighbouring image.
  */
 
 export const OLLAMA_URL = 'http://localhost:11434';
-export const MODEL = 'qwen3-vl:8b-instruct';
+export const OCR_MODELS = Object.freeze([
+  { id: 'qwen3-vl:2b-instruct', label: 'Qwen3-VL 2B (fastest, 3 GB)' },
+  { id: 'qwen3-vl:4b-instruct', label: 'Qwen3-VL 4B (balanced, 5 GB)' },
+  { id: 'qwen3-vl:8b-instruct', label: 'Qwen3-VL 8B (most accurate, 7 GB)' },
+]);
 /** Keep the model in GPU memory between pages. */
 const KEEP_ALIVE = '30m';
 
 const TILE_HEIGHT_RATIO = 1.5;
 /** Tile step relative to image width. Overlap = (1.5 - 1) * width. */
 const TILE_STEP_RATIO = 1;
+/** Height of the neighbouring images' edges, relative to width. */
+const CONTEXT_RATIO = 0.6;
 /** Pixels: a box this close to an inner tile edge is treated as cut off. */
 const CUT_EDGE_MARGIN = 8;
 const JPEG_QUALITY = 0.92;
@@ -52,39 +63,57 @@ const RESPONSE_SCHEMA = {
  * @typedef {{ x0: number, y0: number, x1: number, y1: number }} BBox
  * @typedef {{ text: string, bbox: BBox }} Bubble
  * @typedef {{ top: number, width: number, height: number }} Tile
+ * @typedef {{ bitmap: ImageBitmap, sourceTop: number, sourceHeight: number, top: number, height: number }} StripPart
+ *   A slice of an image placed in the strip, scaled to the strip width.
  */
 
 /**
- * @param {string} url Image URL.
- * @returns {Promise<Bubble[]>} Bubbles top to bottom, in image pixels.
+ * @param {{ url: string, aboveUrl?: string, belowUrl?: string }} images The
+ *   image to read, and the images directly above and below it on the page.
+ * @param {string} model Ollama vision model.
+ * @returns {Promise<Bubble[]>} Bubbles top to bottom, in the image's pixels.
  */
-export async function recognizeImage(url) {
-  const bitmap = await loadBitmap(url);
+export async function recognizeImage({ url, aboveUrl, belowUrl }, model) {
+  const [bitmap, above, below] = await Promise.all([
+    loadBitmap(url),
+    aboveUrl && loadBitmap(aboveUrl).catch(() => null), // Read without that edge.
+    belowUrl && loadBitmap(belowUrl).catch(() => null),
+  ]);
   try {
+    const { parts, offset, height } = planStrip(bitmap, above, below);
     const bubbles = [];
-    for (const tile of planTiles(bitmap.width, bitmap.height)) {
-      const tileBubbles = await recognizeTile(bitmap, tile);
-      bubbles.push(...tileBubbles.filter((b) => !isCutByTileEdge(b.bbox, tile, bitmap.height)));
+    for (const tile of planTiles(bitmap.width, height)) {
+      const tileBubbles = await recognizeTile(parts, tile, model);
+      bubbles.push(...tileBubbles.filter((b) => !isCutByTileEdge(b.bbox, tile, height)));
     }
-    return removeDuplicates(bubbles).sort((a, b) => a.bbox.y0 - b.bbox.y0);
+    return removeDuplicates(bubbles)
+      .map(({ text, bbox }) => ({
+        text,
+        bbox: { ...bbox, y0: bbox.y0 - offset, y1: bbox.y1 - offset },
+      }))
+      .filter(({ bbox }) => {
+        const centre = (bbox.y0 + bbox.y1) / 2;
+        return centre >= 0 && centre < bitmap.height; // Else the neighbour's bubble.
+      })
+      .sort((a, b) => a.bbox.y0 - b.bbox.y0);
   } finally {
-    bitmap.close();
+    for (const b of [bitmap, above, below]) b?.close();
   }
 }
 
 /** Loads the model into GPU memory so the first page doesn't wait for it. */
-export async function warmUpModel() {
-  await ollamaRequest('/api/generate', { model: MODEL, keep_alive: KEEP_ALIVE });
+export async function warmUpModel(model) {
+  await ollamaRequest('/api/generate', { model, keep_alive: KEEP_ALIVE });
 }
 
 /** @returns {Promise<{ ready: boolean, message: string }>} */
-export async function checkOllama() {
+export async function checkOllama(model) {
   try {
     const { models } = await ollamaRequest('/api/tags');
-    const installed = models.some((model) => model.name === MODEL);
+    const installed = models.some(({ name }) => name === model);
     return installed
-      ? { ready: true, message: `OCR ready (${MODEL})` }
-      : { ready: false, message: `Model missing. Run: ollama pull ${MODEL}` };
+      ? { ready: true, message: `OCR ready (${model})` }
+      : { ready: false, message: `Model missing. Run: ollama pull ${model}` };
   } catch (error) {
     return { ready: false, message: error.message };
   }
@@ -96,7 +125,38 @@ async function loadBitmap(url) {
   return createImageBitmap(await response.blob());
 }
 
-/** @returns {Tile[]} Overlapping tiles covering the image top to bottom. */
+/**
+ * Stacks the bottom of the image above, the image, and the top of the image
+ * below. Neighbours are scaled to the image's width, as on the page.
+ * @returns {{ parts: StripPart[], offset: number, height: number }} `offset` is
+ *   where the image starts in the strip.
+ */
+function planStrip(bitmap, above, below) {
+  const width = bitmap.width;
+  const context = Math.round(width * CONTEXT_RATIO);
+  const parts = [];
+  let top = 0;
+
+  if (above) {
+    const scale = width / above.width;
+    const height = Math.min(context, Math.round(above.height * scale));
+    const sourceHeight = height / scale;
+    parts.push({ bitmap: above, sourceTop: above.height - sourceHeight, sourceHeight, top, height });
+    top += height;
+  }
+  const offset = top;
+  parts.push({ bitmap, sourceTop: 0, sourceHeight: bitmap.height, top, height: bitmap.height });
+  top += bitmap.height;
+  if (below) {
+    const scale = width / below.width;
+    const height = Math.min(context, Math.round(below.height * scale));
+    parts.push({ bitmap: below, sourceTop: 0, sourceHeight: height / scale, top, height });
+    top += height;
+  }
+  return { parts, offset, height: top };
+}
+
+/** @returns {Tile[]} Overlapping tiles covering the strip top to bottom. */
 function planTiles(width, height) {
   const tileHeight = Math.min(height, Math.round(width * TILE_HEIGHT_RATIO));
   const step = Math.round(width * TILE_STEP_RATIO);
@@ -108,14 +168,22 @@ function planTiles(width, height) {
   }
 }
 
-/** @returns {Promise<Bubble[]>} */
-async function recognizeTile(bitmap, tile) {
+/** @returns {Promise<Bubble[]>} Bubbles in strip pixels. */
+async function recognizeTile(parts, tile, model) {
   const canvas = new OffscreenCanvas(tile.width, tile.height);
-  canvas.getContext('2d').drawImage(bitmap, 0, -tile.top);
+  const context = canvas.getContext('2d');
+  for (const { bitmap, sourceTop, sourceHeight, top, height } of parts) {
+    // Parts outside the tile are clipped by the canvas.
+    context.drawImage(
+      bitmap,
+      0, sourceTop, bitmap.width, sourceHeight,
+      0, top - tile.top, tile.width, height,
+    ); // prettier-ignore
+  }
   const jpeg = await canvas.convertToBlob({ type: 'image/jpeg', quality: JPEG_QUALITY });
 
   const { message } = await ollamaRequest('/api/chat', {
-    model: MODEL,
+    model,
     stream: false,
     think: false,
     keep_alive: KEEP_ALIVE,
@@ -126,11 +194,20 @@ async function recognizeTile(bitmap, tile) {
 
   return JSON.parse(message.content)
     .bubbles.filter(({ text, box }) => text.trim() && box.length === 4)
-    .map(({ text, box }) => ({ text: text.trim(), bbox: toImagePixels(box, tile) }));
+    .map(({ text, box }) => ({ text: toSentenceCase(text.trim()), bbox: toStripPixels(box, tile) }));
 }
 
-/** Converts a 0-1000 normalized tile box to image pixels. */
-function toImagePixels([x0, y0, x1, y1], tile) {
+/** Small models sometimes ignore the prompt and keep comic lettering ALL CAPS. */
+function toSentenceCase(text) {
+  if (/[a-z]/.test(text) || !/[A-Z]/.test(text)) return text;
+  return text
+    .toLowerCase()
+    .replace(/(^|[.!?…]\s+)(\p{L})/gu, (_, before, letter) => before + letter.toUpperCase())
+    .replace(/\bi\b/g, 'I');
+}
+
+/** Converts a 0-1000 normalized tile box to strip pixels. */
+function toStripPixels([x0, y0, x1, y1], tile) {
   return {
     x0: (x0 / 1000) * tile.width,
     y0: tile.top + (y0 / 1000) * tile.height,
@@ -139,10 +216,10 @@ function toImagePixels([x0, y0, x1, y1], tile) {
   };
 }
 
-function isCutByTileEdge(bbox, tile, imageHeight) {
+function isCutByTileEdge(bbox, tile, stripHeight) {
   const tileBottom = tile.top + tile.height;
   const cutAtTop = tile.top > 0 && bbox.y0 < tile.top + CUT_EDGE_MARGIN;
-  const cutAtBottom = tileBottom < imageHeight && bbox.y1 > tileBottom - CUT_EDGE_MARGIN;
+  const cutAtBottom = tileBottom < stripHeight && bbox.y1 > tileBottom - CUT_EDGE_MARGIN;
   return cutAtTop || cutAtBottom;
 }
 

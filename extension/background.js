@@ -28,7 +28,8 @@ async function isReading(tabId) {
 }
 
 async function startReading(tab) {
-  warmUpModel().catch((error) => console.warn('Loading the OCR model failed:', error));
+  const { ocrModel } = await loadSettings();
+  warmUpModel(ocrModel).catch((error) => console.warn('Loading the OCR model failed:', error));
   await injectReader(tab.id);
   const tabs = await getReadingTabs();
   tabs[tab.id] = new URL(tab.url).origin;
@@ -81,21 +82,23 @@ chrome.commands.onCommand.addListener((command, tab) => {
 });
 
 // ---------------------------------------------------------------------------
-// OCR via the local Ollama vision model. Results are cached per image URL, so
-// scrolling back or re-reading never repeats the work.
+// OCR via the local Ollama vision model. Results are cached per image, its
+// neighbours and model, so scrolling back or re-reading never repeats the work.
 // ---------------------------------------------------------------------------
 
 /** @type {Map<string, Promise<import('./lib/ollama-ocr.js').Bubble[]>>} */
 const ocrCache = new Map();
 
-async function recognize(url) {
-  if (!ocrCache.has(url)) {
+async function recognize({ url, aboveUrl, belowUrl }) {
+  const { ocrModel } = await loadSettings();
+  const key = JSON.stringify([ocrModel, url, aboveUrl, belowUrl]);
+  if (!ocrCache.has(key)) {
     if (ocrCache.size >= MAX_CACHED_IMAGES) ocrCache.delete(ocrCache.keys().next().value);
-    const result = keepAliveWhile(recognizeImage(url));
-    result.catch(() => ocrCache.delete(url)); // Allow a retry after failures.
-    ocrCache.set(url, result);
+    const result = keepAliveWhile(recognizeImage({ url, aboveUrl, belowUrl }, ocrModel));
+    result.catch(() => ocrCache.delete(key)); // Allow a retry after failures.
+    ocrCache.set(key, result);
   }
-  return { bubbles: await ocrCache.get(url) };
+  return { bubbles: await ocrCache.get(key) };
 }
 
 /**
@@ -198,12 +201,12 @@ function speakWithBrowser(text, settings) {
 // ---------------------------------------------------------------------------
 
 const messageHandlers = {
-  'reader:ocr': ({ url }) => recognize(url),
+  'reader:ocr': (message) => recognize(message),
   'reader:speak': ({ text }) => speak(text),
   'reader:prepare': ({ text }) => prepareSpeech(text),
   'popup:get-state': async ({ tabId }) => ({
     reading: await isReading(tabId),
-    ocr: await checkOllama(),
+    ocr: await checkOllama((await loadSettings()).ocrModel),
     tts: await checkTtsServer(),
   }),
   'popup:speak-sample': async ({ text, settings }) => {

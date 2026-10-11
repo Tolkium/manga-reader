@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Manga Reader TTS",
-  "version": "2.0.0",
+  "version": "2.1.0",
+  "version_name": "2.1.0 beta",
   "description": "Reads manga, manhwa and manhua speech bubbles aloud as they scroll into view.",
   "minimum_chrome_version": "116",
   "permissions": ["storage", "tts", "scripting", "offscreen"],

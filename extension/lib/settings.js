@@ -7,6 +7,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   pitch: 1,
   /** Read a bubble again after it scrolled fully out of view and back in. */
   rereadOnReturn: false,
+  /** Ollama vision model that finds the text, one of OCR_MODELS. */
+  ocrModel: 'qwen3-vl:4b-instruct',
 });
 
 /** @returns {Promise<typeof DEFAULT_SETTINGS>} */
