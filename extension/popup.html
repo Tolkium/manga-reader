@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Manga Reader TTS</title>
+    <link rel="stylesheet" href="popup.css" />
+    <script type="module" src="popup.js"></script>
+  </head>
+  <body>
+    <main>
+      <button id="toggle" class="primary" type="button" disabled>Start reading</button>
+      <p id="status" class="status" role="status"></p>
+      <p id="ocr-status" class="status"></p>
+
+      <label class="field">
+        <span>Voice</span>
+        <select id="voice">
+          <optgroup id="kokoro-voices" label="Kokoro (local AI)"></optgroup>
+          <optgroup id="browser-voices" label="Browser voices">
+            <option value="">System default</option>
+          </optgroup>
+        </select>
+      </label>
+      <p id="tts-status" class="status" hidden></p>
+
+      <label class="field">
+        <span>Speech rate <output id="rate-value" for="rate"></output></span>
+        <input id="rate" type="range" min="0.3" max="6" step="0.1" />
+      </label>
+
+      <label class="field">
+        <span>Pitch <output id="pitch-value" for="pitch"></output></span>
+        <!-- 2 is the maximum pitch chrome.tts supports. Kokoro voices ignore it. -->
+        <input id="pitch" type="range" min="0" max="2" step="0.1" />
+      </label>
+
+      <label class="checkbox">
+        <input id="reread" type="checkbox" />
+        Re-read text when scrolling back to it
+      </label>
+
+      <button id="test" type="button">Listen to an example</button>
+    </main>
+  </body>
+</html>

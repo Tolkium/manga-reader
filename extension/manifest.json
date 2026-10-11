@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Manga Reader TTS",
+  "version": "2.0.0",
+  "description": "Reads manga, manhwa and manhua speech bubbles aloud as they scroll into view.",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "tts", "scripting", "offscreen"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Manga Reader TTS",
+    "default_popup": "popup.html"
+  },
+  "commands": {
+    "toggle-reading": {
+      "suggested_key": { "default": "Alt+Shift+R" },
+      "description": "Start or stop reading the current tab"
+    }
+  }
+}

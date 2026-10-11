@@ -1,0 +1,6 @@
+# Install PyTorch with CUDA first (RTX 50-series needs CUDA 12.8 or newer):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+kokoro
+numpy
+soundfile
+torch
