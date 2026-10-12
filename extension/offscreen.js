@@ -6,6 +6,8 @@ const MAX_CACHED_CLIPS = 30;
 // Chrome mutes media played faster than 4×.
 const MIN_RATE = 0.5;
 const MAX_RATE = 4;
+/** Extra time after a clip's length before playback counts as stuck. */
+const STALL_GRACE_MS = 3000;
 
 /** Generated clips by voice and text, so bubbles prepared ahead play at once. */
 const clips = new Map();
@@ -55,11 +57,19 @@ async function play({ text, voice, rate }) {
   playback.audio = audio;
 
   return new Promise((resolve) => {
+    let stallTimer;
     playback.finish = (status) => {
+      clearTimeout(stallTimer);
       audio.pause();
       URL.revokeObjectURL(url);
       if (current === playback) current = null;
       resolve({ status });
+    };
+    // `ended` occasionally never fires; don't let one clip block the reader.
+    audio.onloadedmetadata = () => {
+      if (!Number.isFinite(audio.duration)) return;
+      const lengthMs = (audio.duration / audio.playbackRate) * 1000;
+      stallTimer = setTimeout(() => playback.finish('end'), lengthMs + STALL_GRACE_MS);
     };
     audio.onended = () => playback.finish('end');
     audio.onerror = () => playback.finish('error');

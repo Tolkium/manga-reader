@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Manga Reader: setup guide</title>
+    <link rel="stylesheet" href="guide.css" />
+    <script type="module" src="guide.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <img src="icons/icon-128.png" alt="" width="56" height="56" />
+      <div>
+        <h1>Manga Reader</h1>
+        <p>Set it up once, then let it read your manga aloud.</p>
+      </div>
+    </header>
+
+    <main>
+      <section>
+        <h2>What you need</h2>
+        <ul>
+          <li>A Windows PC with an NVIDIA graphics card: at least 4 GB of graphics memory, 9 GB for the best text model.</li>
+          <li>Any Chromium-based browser, like Chrome or Brave.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2><span class="step">1</span> Install Ollama</h2>
+        <p>Ollama reads the text in the pictures.</p>
+        <ol>
+          <li>Download and install it from <a href="https://ollama.com" target="_blank" rel="noopener">ollama.com</a>.</li>
+          <li>
+            Open <b>PowerShell</b> and run these two commands:
+            <pre><code>ollama pull qwen3-vl:4b-instruct</code></pre>
+            <pre><code>[Environment]::SetEnvironmentVariable('OLLAMA_ORIGINS', 'chrome-extension://*', 'User')</code></pre>
+          </li>
+          <li>Restart Ollama: right-click its icon at the bottom right of the taskbar, choose <b>Quit</b>, then open it again.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2><span class="step">2</span> Start the local server</h2>
+        <p>It finds the speech bubbles and gives you the natural voices.</p>
+        <ol>
+          <li>Install Python from <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">python.org</a>. Tick <b>Add python.exe to PATH</b> during setup.</li>
+          <li>
+            Open PowerShell in the Manga Reader folder and run:
+            <pre><code>pip install torch --index-url https://download.pytorch.org/whl/cu128</code></pre>
+            <pre><code>pip install -r tts-server\requirements.txt</code></pre>
+          </li>
+          <li>Double-click <code>tts-server\start.bat</code> and keep its window open while you read.</li>
+        </ol>
+        <p class="tip">After restarting your PC, double-click <code>start.bat</code> again.</p>
+      </section>
+
+      <section>
+        <h2><span class="step">3</span> Add the extension</h2>
+        <ol>
+          <li>Open your browser's extensions page and turn on <b>Developer mode</b>.</li>
+          <li>Click <b>Load unpacked</b> and choose the <code>extension</code> folder.</li>
+        </ol>
+        <p class="tip">If you can see this page, this step is done.</p>
+      </section>
+
+      <section>
+        <h2>Read</h2>
+        <p>
+          Open a chapter, click the extension icon and press <b>Start reading</b> (or <kbd>Alt+Shift+R</kbd>).
+          Each bubble is read when it's fully on screen.
+        </p>
+      </section>
+
+      <section>
+        <h2>Change the text model or voice</h2>
+        <p><b>Text model:</b> download another one in PowerShell, then pick it in the popup.</p>
+        <pre><code>ollama pull qwen3-vl:8b-instruct</code></pre>
+        <p>
+          <b>Voices:</b> add or remove voices in <code>tts-server\settings.json</code>, then restart
+          <code>start.bat</code>.
+        </p>
+        <details>
+          <summary>Show all voices</summary>
+          <div class="voices">
+            <div><b>US female</b> af_alloy, af_aoede, af_bella, af_heart, af_jessica, af_kore, af_nicole, af_nova, af_river, af_sarah, af_sky</div>
+            <div><b>US male</b> am_adam, am_echo, am_eric, am_fenrir, am_liam, am_michael, am_onyx, am_puck, am_santa</div>
+            <div><b>UK female</b> bf_alice, bf_emma, bf_isabella, bf_lily</div>
+            <div><b>UK male</b> bm_daniel, bm_fable, bm_george, bm_lewis</div>
+          </div>
+        </details>
+      </section>
+
+      <section>
+        <h2>Something's wrong?</h2>
+        <p>The popup shows three status marks. Hover one to see what's wrong.</p>
+        <dl>
+          <dt>Text reader is red</dt>
+          <dd>Make sure Ollama is open, and redo step 1.</dd>
+          <dt>Bubbles or Voice is amber</dt>
+          <dd>The local server isn't running. Double-click <code>tts-server\start.bat</code>.</dd>
+          <dt>Reading is slow</dt>
+          <dd>Pick a smaller text model in the popup.</dd>
+        </dl>
+      </section>
+    </main>
+  </body>
+</html>

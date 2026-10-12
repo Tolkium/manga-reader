@@ -1,8 +1,9 @@
 import { checkOllama, recognizeImage, warmUpModel } from './lib/ollama-ocr.js';
-import { checkTtsServer, isKokoroVoice, kokoroVoiceId } from './lib/kokoro.js';
+import { isKokoroVoice, kokoroVoiceId } from './lib/kokoro.js';
+import { checkLocalServer } from './lib/local-server.js';
 import { loadSettings, toTtsOptions } from './lib/settings.js';
 
-/** chrome.storage.session key: { [tabId]: origin the reader was started on } */
+/** chrome.storage.session key: { [tabId]: site the reader was started on } */
 const READING_TABS_KEY = 'readingTabs';
 const FINAL_TTS_EVENTS = new Set(['end', 'interrupted', 'cancelled', 'error']);
 const MAX_CACHED_IMAGES = 300;
@@ -32,8 +33,13 @@ async function startReading(tab) {
   warmUpModel(ocrModel).catch((error) => console.warn('Loading the OCR model failed:', error));
   await injectReader(tab.id);
   const tabs = await getReadingTabs();
-  tabs[tab.id] = new URL(tab.url).origin;
+  tabs[tab.id] = siteOf(tab.url);
   await setReadingTabs(tabs);
+}
+
+/** Host without `www.`, so example.com and www.example.com are one site. */
+function siteOf(url) {
+  return new URL(url).hostname.replace(/^www\./, '');
 }
 
 async function stopReading(tabId) {
@@ -58,13 +64,22 @@ async function injectReader(tabId) {
   await chrome.action.setBadgeText({ tabId, text: 'ON' });
 }
 
-// Keep reading across chapter navigation on the same site.
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.status !== 'complete') return;
+// Show the setup guide once, right after the extension is installed.
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason === chrome.runtime.OnInstalledReason.INSTALL) {
+    chrome.tabs.create({ url: chrome.runtime.getURL('guide.html') });
+  }
+});
+
+// Keep reading across chapter navigation on the same site. Inject as soon as
+// the page's HTML is ready: the full load waits for every image and ad, which
+// can take a long time on comic sites.
+chrome.webNavigation.onDOMContentLoaded.addListener(async ({ tabId, frameId, url }) => {
+  if (frameId !== 0) return;
   const tabs = await getReadingTabs();
   if (!(tabId in tabs)) return;
 
-  if (tab.url && new URL(tab.url).origin === tabs[tabId]) {
+  if (siteOf(url) === tabs[tabId]) {
     await injectReader(tabId).catch((error) => console.warn('Re-injecting reader failed:', error));
   } else {
     await stopReading(tabId);
@@ -89,12 +104,13 @@ chrome.commands.onCommand.addListener((command, tab) => {
 /** @type {Map<string, Promise<import('./lib/ollama-ocr.js').Bubble[]>>} */
 const ocrCache = new Map();
 
-async function recognize({ url, aboveUrl, belowUrl }) {
+async function recognize({ url, aboveUrl, belowUrl, closedTop, closedBottom }) {
   const { ocrModel } = await loadSettings();
-  const key = JSON.stringify([ocrModel, url, aboveUrl, belowUrl]);
+  const images = { url, aboveUrl, belowUrl, closedTop, closedBottom };
+  const key = JSON.stringify([ocrModel, url, aboveUrl, belowUrl, closedTop, closedBottom]);
   if (!ocrCache.has(key)) {
     if (ocrCache.size >= MAX_CACHED_IMAGES) ocrCache.delete(ocrCache.keys().next().value);
-    const result = keepAliveWhile(recognizeImage({ url, aboveUrl, belowUrl }, ocrModel));
+    const result = keepAliveWhile(recognizeImage(images, ocrModel));
     result.catch(() => ocrCache.delete(key)); // Allow a retry after failures.
     ocrCache.set(key, result);
   }
@@ -196,6 +212,19 @@ function speakWithBrowser(text, settings) {
   });
 }
 
+/**
+ * What the popup shows: Ollama decides whether OCR works at all; the local
+ * server adds the bubble detector (better OCR) and Kokoro voices.
+ */
+async function getStatus(tabId) {
+  const [reading, ocr, server] = await Promise.all([
+    isReading(tabId),
+    loadSettings().then(({ ocrModel }) => checkOllama(ocrModel)),
+    checkLocalServer(),
+  ]);
+  return { reading, ocr, server: { ready: server.ready, detector: Boolean(server.detector) } };
+}
+
 // ---------------------------------------------------------------------------
 // Messaging
 // ---------------------------------------------------------------------------
@@ -204,11 +233,7 @@ const messageHandlers = {
   'reader:ocr': (message) => recognize(message),
   'reader:speak': ({ text }) => speak(text),
   'reader:prepare': ({ text }) => prepareSpeech(text),
-  'popup:get-state': async ({ tabId }) => ({
-    reading: await isReading(tabId),
-    ocr: await checkOllama((await loadSettings()).ocrModel),
-    tts: await checkTtsServer(),
-  }),
+  'popup:get-state': ({ tabId }) => getStatus(tabId),
   'popup:speak-sample': async ({ text, settings }) => {
     await stopSpeech();
     return speak(text, settings);

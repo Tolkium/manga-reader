@@ -1,128 +1,137 @@
+<div align="center">
+
+<img src="extension/icons/icon-128.png" alt="Manga Reader icon" width="112" />
+
 # Manga Reader TTS
 
-Chrome/Edge extension that reads manga, manhwa and manhua speech bubbles aloud as
-you scroll. Comic sites serve the dialogue as part of the page images. The
-extension sends each image to a vision model running on your own PC (Qwen3-VL
-via [Ollama](https://ollama.com)), which returns every bubble's text and position.
-Each bubble is then spoken once it is **fully** visible on screen, either with
-the browser's built-in text-to-speech or with Kokoro-82M, a natural-sounding AI
-voice that also runs on your PC. Nothing leaves your computer.
+**Your manga, manhwa and manhua, read aloud as you scroll.**
 
-## Requirements
+A browser extension that finds the speech bubbles in comic pages, reads their text with a local AI model
+and speaks each bubble the moment it's fully on screen. Everything runs on your own PC.
 
-- Ollama, plus a GPU with about 5 GB of free VRAM for the default OCR model
-  (Qwen3-VL 4B). The 2B model needs about 3 GB, the 8B model about 7 GB.
-- For Kokoro voices: Python 3.10+ and under 1 GB more VRAM. Without a GPU it
-  runs on the CPU, more slowly.
+![Version](https://img.shields.io/badge/version-1.0-F2A900?style=flat-square&labelColor=1A1714)
+![Browsers](https://img.shields.io/badge/browsers-Chromium--based-F2A900?style=flat-square&labelColor=1A1714)
+![Runs locally](https://img.shields.io/badge/runs-100%25%20locally-F2A900?style=flat-square&labelColor=1A1714)
+![GPU](https://img.shields.io/badge/GPU-NVIDIA%204%20GB%2B-F2A900?style=flat-square&labelColor=1A1714)
 
-## Setup
+<img src="docs/popup.png" alt="The extension popup, light theme while off and dark theme while reading" width="720" />
 
-1. Install Ollama and download the OCR model. Download the 2B or 8B model as
-   well if you want to switch between them in the popup:
+</div>
 
-   ```powershell
-   ollama pull qwen3-vl:4b-instruct
-   ollama pull qwen3-vl:2b-instruct   # optional
-   ollama pull qwen3-vl:8b-instruct   # optional
-   ```
+## Features
 
-2. Allow browser extensions to call Ollama. This is a one-time, user-level setting:
+- 🗨️ **Reads bubbles as you scroll.** Each bubble is spoken once it's fully visible, in reading order.
+- 🎯 **Finds bubbles precisely.** A comic bubble detector frames every bubble and caption; the AI then reads each one on its own.
+- 🧩 **Handles webtoon strips.** Bubbles cut in half between two images are joined and read whole.
+- 🔇 **Skips the noise.** Sound effects, watermarks, scanlation credits and non-English text are left out.
+- 🎙️ **Natural voices.** 15 English AI voices (US and UK) ready to use and 28 available, or your browser's own voices. Speed up to 4× without the chipmunk effect.
+- 🔁 **Keeps going.** Reading continues into the next chapter on the same site.
+- 🔒 **Private.** No accounts, no cloud: the models run on your graphics card.
 
-   ```powershell
-   [Environment]::SetEnvironmentVariable('OLLAMA_ORIGINS', 'chrome-extension://*', 'User')
-   ```
-
-   Then quit Ollama from the system tray and start it again.
-
-3. Open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**,
-   click **Load unpacked** and select the `extension` folder.
-
-The popup shows **OCR ready** when Ollama and the model are reachable. Otherwise
-it says what is missing.
-
-### Kokoro voices
-
-1. Install the Python packages. RTX 50-series cards need the CUDA 12.8 build of
-   PyTorch:
-
-   ```powershell
-   pip install torch --index-url https://download.pytorch.org/whl/cu128
-   pip install -r tts-server\requirements.txt
-   ```
-
-2. Start the server with `tts-server\start.bat` and leave its window open while
-   reading. It listens on `http://127.0.0.1:5005` only. The first start downloads
-   the model and voices (about 350 MB).
-
-3. In the popup, pick a voice under **Kokoro (local AI)**. Heart is the default.
-   The line under the voice list shows **Kokoro ready** when the server is
-   reachable. If the server isn't running, bubbles are read with the browser's
-   default voice instead.
-
-## Use
-
-1. Open a chapter page.
-2. Click the extension icon and press **Start reading**, or press `Alt+Shift+R`.
-   The icon shows an `ON` badge while reading is on.
-3. Scroll at your own pace. Each bubble is read once it is completely on screen.
-
-Reading stays on when you go to the next chapter on the same site. It turns off
-when the tab leaves that site.
-
-### Settings (popup)
-
-| Setting | Effect |
-| --- | --- |
-| Text finder (OCR model) | Qwen3-VL **2B** (fastest), **4B** (default) or **8B** (most accurate). Smaller models are faster and use less VRAM, but misread stylized lettering more often. Images already read keep their text; new images use the new model. |
-| Voice | **Kokoro (local AI)**: 10 female voices (US and UK) and 5 male voices. **Browser voices**: any voice installed in the browser/OS. In Chrome this includes the free "Google US English" and "Google UK English" voices. |
-| Speech rate | 0.3× – 6×. How fast it really gets depends on the voice; some cap at about 3×. Kokoro voices play at 0.5× – 4× and keep their natural pitch when sped up. |
-| Pitch | 0× – 2× (2× is the browser's maximum). How strongly pitch changes the sound depends on the voice. Not available for Kokoro voices. |
-| Re-read text when scrolling back | Off: a bubble is read only once per page load. On: a bubble is read again after it has left the screen completely and comes back. |
+<div align="center">
+<img src="docs/frames.png" alt="Comic panels with the reader's frames: spoken bubbles in green, a waiting one in orange, a skipped sound effect in grey" width="720" />
+<br /><sub>With <b>Show bubble frames</b> on, you see what the reader found: spoken, waiting and skipped bubbles.</sub>
+</div>
 
 ## How it works
 
+```mermaid
+flowchart LR
+    A["📄 Comic page<br/>(your browser)"] --> B["🔍 Bubble finder<br/>local server"]
+    B -- "exact box per bubble" --> C["📖 Text reader<br/>Qwen3-VL in Ollama"]
+    C -- "text, language, kind" --> D{"Worth reading?"}
+    D -- "dialogue, narration" --> E["🎙️ Voice<br/>Kokoro on the local server"]
+    D -- "sound effect, credit,<br/>other language" --> F["⏭️ Skipped"]
+    E --> G["🔊 Spoken when the<br/>bubble is fully on screen"]
 ```
-content.js (page)            background.js (service worker)        Ollama (localhost:11434)
-  find comic images  ──ocr──▶  fetch image + neighbours'     ──tile──▶  qwen3-vl (2b/4b/8b)
-                               edges, cut into tiles
-  map bubbles to screen ◀──────  merge tiles, cache results  ◀─JSON──  text + box per bubble
-  queue fully visible ──speak─▶ chrome.tts (rate, pitch, voice)
-                               or offscreen.js ──text──▶ tts-server (localhost:5005)
-                                  plays WAV  ◀──audio──  Kokoro-82M (PyTorch)
+
+1. The extension finds the comic images on the page, starting with the one closest to where you are.
+2. The **bubble finder** draws an exact box around every speech bubble and caption.
+3. The **text reader** reads each box on its own and says what kind of text it is.
+4. Dialogue and narration go to the **voice**; sound effects, credits and other languages are skipped.
+5. Each bubble is spoken when it's fully on screen. The next ones are prepared while one is playing, so there's no wait between them.
+
+## What you need
+
+- A Windows PC with an **NVIDIA graphics card**: at least **4 GB** of graphics memory, **9 GB** for the best text model.
+- Any **Chromium-based browser**, like Chrome or Brave.
+
+## Install
+
+The extension has a built-in setup guide: click **?** in the popup. In short:
+
+**1. Ollama** reads the text. Install it from [ollama.com](https://ollama.com), then in PowerShell:
+
+```powershell
+ollama pull qwen3-vl:4b-instruct
+[Environment]::SetEnvironmentVariable('OLLAMA_ORIGINS', 'chrome-extension://*', 'User')
 ```
 
-- **content.js** tracks images at least 300 px wide and OCRs them one at a time,
-  starting with the one closest to the viewport. It maps bubble boxes onto the
-  screen on every scroll frame and queues bubbles that are fully visible. A queued
-  bubble that has scrolled out of view before its turn is skipped, and it stays
-  unread until it comes back into view.
-- **lib/ollama-ocr.js** cuts tall webtoon strips into overlapping tiles (1.5×
-  the image width tall). Each tile is sent to the model, which is constrained to
-  return JSON. Bubbles cut by a tile edge are dropped, because they appear whole
-  in the neighbouring tile, and duplicates from the overlap are merged.
-- **Bubbles split between two images**: sites often cut one long strip into
-  several images, sometimes right through a bubble. Images that sit directly
-  above each other (at most 12 px apart, same column) count as neighbours. Each
-  image is read together with the bottom of the image above and the top of the
-  image below (0.6× the width each), so a split bubble is seen whole. The bubble
-  belongs to the image that holds its centre. If a neighbour loads later, the
-  image is read again, and when both images report the same bubble, the copy
-  with more text is kept.
-- If a small model returns ALL CAPS text anyway, it is converted to sentence case.
-- On an RTX 5080 the 4B model reads a page about 25% faster than 8B, and 2B
-  about 50% faster. Reading the neighbours' edges adds about 30% more work.
-- **Kokoro voices**: `tts-server/kokoro_server.py` turns a bubble's text into a
-  WAV file. The background plays it in an offscreen document, because a service
-  worker can't play audio. While one bubble plays, the next two queued bubbles
-  are generated ahead. On an RTX 5080 a bubble takes about 0.1 seconds.
+Restart Ollama afterwards.
 
-To try another Ollama vision model, add it to `OCR_MODELS` in `lib/ollama-ocr.js`.
+**2. The local server** finds the bubbles and gives you the AI voices. Install [Python](https://www.python.org/downloads/), then in the project folder:
 
-## Limitations
+```powershell
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install -r tts-server\requirements.txt
+```
 
-- The first image of a chapter takes about 10 seconds before its first bubble can
-  be read, because an image is processed in full before any of its bubbles are
-  read.
-- A bubble taller than half the image width can be cut by every tile and missed.
-- Images from hosts that block requests without the page's referrer can't be
-  fetched, so they are skipped. The reason is logged in the page console.
+Double-click `tts-server\start.bat` and keep it open while you read.
+
+**3. The extension.** Open your browser's extensions page, turn on **Developer mode**, click **Load unpacked** and choose the `extension` folder.
+
+<div align="center">
+<img src="docs/guide.png" alt="The built-in setup guide" width="560" />
+</div>
+
+## Use
+
+Open a chapter, click the extension icon and press **Start reading**, or press <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>.
+
+| Setting | What it does |
+| --- | --- |
+| **Voice** | An AI voice from the local server, or one of your browser's voices. ▶ plays a sample. |
+| **Speed** | 0.5× to 4×. |
+| **Text model** | Which Ollama model reads the text. Smaller is faster, bigger is more accurate. |
+| **English only** | Skip text in other languages. |
+| **Re-read when scrolling back** | Read a bubble again when you scroll back to it. |
+| **Show bubble frames** | Frame every found bubble on the page with its status. |
+
+The three status marks in the popup (**Text reader**, **Bubbles**, **Voice**) turn green when everything works. Hover one to see what's wrong.
+
+## Change the models
+
+- **Text model:** `ollama pull <model>` any Ollama model that can read images, and it shows up in the popup.
+- **Voices:** edit `tts-server\settings.json` and restart `start.bat`. All available voice names are listed in the setup guide.
+
+## Project layout
+
+```
+extension/          the browser extension
+  popup.*           the toolbar popup
+  guide.*           the setup guide page
+  content.js        runs on the comic page: finds images, tracks bubbles, queues speech
+  background.js     OCR and speech coordination
+  lib/              OCR, voices, settings
+tts-server/         local server: bubble finder + Kokoro voices (localhost:5005)
+docs/               README pictures
+```
+
+<details>
+<summary><b>Under the hood</b></summary>
+
+- **Bubble finder:** [comic-text-and-bubble-detector](https://huggingface.co/ogkalu/comic-text-and-bubble-detector), an RT-DETR-v2 model trained on manga, webtoon, manhua and western comics. Each image is cut into overlapping squares; text inside a bubble takes the bubble's box, captions keep their own.
+- **Cut-outs:** each box is read with a small margin. Other text reaching into it (a watermark on the edge, signs behind it) is painted over first, and the box's own text is never covered.
+- **Split bubbles:** each image is read together with the edges of the images above and below it, so whichever is read second sees a bubble cut by the border whole.
+- **Without the local server**, Qwen3-VL finds and reads the bubbles itself on overlapping tiles. It works, but slower and with rougher boxes.
+- **Clean-up:** looping model output is cut to one copy, lines of one bubble are joined, duplicates from neighbouring images are merged, and a line is never spoken twice within 30 seconds.
+- **Never stuck:** OCR and speech requests time out, failed images are retried, and slow images are waited for.
+- **Speed on an RTX 5080:** the bubble finder takes well under a second per page, reading a bubble about 0.3–0.6 s with the 4B model, and a voice clip about 0.1 s.
+
+</details>
+
+## Credits
+
+- [Ollama](https://ollama.com) with [Qwen3-VL](https://huggingface.co/Qwen) for reading text (Apache-2.0)
+- [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M) for the voices (Apache-2.0)
+- [comic-text-and-bubble-detector](https://huggingface.co/ogkalu/comic-text-and-bubble-detector) for finding bubbles (Apache-2.0)

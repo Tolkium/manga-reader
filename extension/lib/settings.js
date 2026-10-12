@@ -9,6 +9,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   rereadOnReturn: false,
   /** Ollama vision model that finds the text, one of OCR_MODELS. */
   ocrModel: 'qwen3-vl:4b-instruct',
+  /** Skip text that isn't mostly Latin script, such as Korean sound effects. */
+  englishOnly: true,
+  /** Debug: frame every found bubble on the page with its status. */
+  showBoxes: false,
 });
 
 /** @returns {Promise<typeof DEFAULT_SETTINGS>} */
